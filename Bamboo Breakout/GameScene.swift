@@ -85,7 +85,7 @@ class GameScene: SKScene {
             paddle.position = CGPoint(x: paddleX, y: paddle.position.y)
         }
     }
-    
+    // random comment
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         isFingerOnPaddle = false 
     }
