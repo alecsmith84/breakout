@@ -24,14 +24,23 @@
  */ 
 
 import SpriteKit
+import GameplayKit
+
 
 let BallCategoryName = "ball"
 let PaddleCategoryName = "paddle"
 let BlockCategoryName = "block"
 let GameMessageName = "gameMessage"
 
+let BallCategory   : UInt32 = 0x1 << 0
+let BottomCategory : UInt32 = 0x1 << 1
+let BlockCategory  : UInt32 = 0x1 << 2
+let PaddleCategory : UInt32 = 0x1 << 3
+let BorderCategory : UInt32 = 0x1 << 4
 
-class GameScene: SKScene {
+
+
+class GameScene: SKScene, SKPhysicsContactDelegate {
   
   override func didMove(to view: SKView) {
     super.didMove(to: view)
@@ -46,13 +55,93 @@ class GameScene: SKScene {
     // make it move
     // remove all gravity
     physicsWorld.gravity = CGVector(dx: 0.0, dy: 0.0)
+    physicsWorld.contactDelegate = self
+
     // set the ball from the child nodes
     let ball = childNode(withName: BallCategoryName) as! SKSpriteNode
-    ball.physicsBody!.applyImpulse(CGVector(dx: 2.0, dy: -2.0))
     
+    
+    // bottom physics body
+    let bottomRect = CGRect(x: frame.origin.x, y: frame.origin.y, width: frame.size.width, height: 1)
+    let bottom = SKNode()
+    bottom.physicsBody = SKPhysicsBody(edgeLoopFrom: bottomRect)
+    addChild(bottom)
+
+    // assigns physics constants
+    let paddle = childNode(withName: PaddleCategoryName) as! SKSpriteNode
+    
+    bottom.physicsBody!.categoryBitMask = BottomCategory
+    ball.physicsBody!.contactTestBitMask = BottomCategory | BlockCategory
+    paddle.physicsBody!.categoryBitMask = PaddleCategory
+    borderBody.categoryBitMask = BorderCategory
+
+    ball.physicsBody!.contactTestBitMask = BottomCategory
+
+
+    // MARK: Blocks
+    // 1 Constraints
+    let numberOfBlocks = 8
+    let blockWidth = SKSpriteNode(imageNamed: "block").size.width
+    let totalBlocksWidth = blockWidth * CGFloat(numberOfBlocks)
+    // 2  how far from the sides do the blocks end
+    let xOffset = (frame.width - totalBlocksWidth) / 2
+    // 3 Create Blocks
+    for i in 0..<numberOfBlocks {
+        let block = SKSpriteNode(imageNamed: "block.png")
+        block.position = CGPoint(x: xOffset + CGFloat(CGFloat(i) + 0.5) * blockWidth,
+                                 y: frame.height * 0.8)
+        
+        block.physicsBody = SKPhysicsBody(rectangleOf: block.frame.size)
+        block.physicsBody!.allowsRotation = false
+        block.physicsBody!.friction = 0.0
+        block.physicsBody!.affectedByGravity = false
+        block.physicsBody!.isDynamic = false
+        block.name = BlockCategoryName
+        block.physicsBody!.categoryBitMask = BlockCategory
+        block.zPosition = 2
+        addChild(block)
+    }
+
+    // Display tap to play message
+    let gameMessage = SKSpriteNode(imageNamed: "TapToPlay")
+    gameMessage.name = GameMessageName
+    gameMessage.position = CGPoint(x: frame.midX, y: frame.midY)
+    gameMessage.zPosition = 4
+    gameMessage.setScale(0.0)
+    addChild(gameMessage)
+    
+    gameState.enter(WaitingForTap.self)
+    
+    func randomFloat(from: CGFloat, to: CGFloat) -> CGFloat {
+        let rand: CGFloat = CGFloat(Float(arc4random()) / 0xFFFFFFFF)
+        return (rand) * (to - from) + from
+    }
+
+
   }
+    // Break the Bamboo
+    func breakBlock(node: SKNode) {
+        let particles = SKEmitterNode(fileNamed: "BrokenPlatform")!
+        particles.position = node.position
+        particles.zPosition = 3
+        addChild(particles)
+        particles.run(SKAction.sequence([SKAction.wait(forDuration: 1.0),
+                                         SKAction.removeFromParent()]))
+        node.removeFromParent()
+    }
+
+    
+
+
     
     var isFingerOnPaddle = false
+    
+    // Checks the state of the game
+    lazy var gameState: GKStateMachine = GKStateMachine(states: [
+        WaitingForTap(scene: self),
+        Playing(scene: self),
+        GameOver(scene: self)])
+
     
     // This adds a event in the console saying that you have touched the paddle to begin movement
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -88,6 +177,32 @@ class GameScene: SKScene {
     // random comment
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         isFingerOnPaddle = false 
+    }
+    
+    // sets up objects compared to bitmasks
+    func didBegin(_ contact: SKPhysicsContact) {
+        // 1 variables
+        var firstBody: SKPhysicsBody
+        var secondBody: SKPhysicsBody
+        // 2 set bitmasks
+        if contact.bodyA.categoryBitMask < contact.bodyB.categoryBitMask {
+            firstBody = contact.bodyA
+            secondBody = contact.bodyB
+        } else {
+            firstBody = contact.bodyB
+            secondBody = contact.bodyA
+        }
+        // 3 confirm body categories
+        if firstBody.categoryBitMask == BallCategory && secondBody.categoryBitMask == BottomCategory {
+            print("Hit bottom. First contact has been made.")
+        }
+
+        // Checks to see if the block has been broken
+        if firstBody.categoryBitMask == BallCategory && secondBody.categoryBitMask == BlockCategory {
+            breakBlock(node: secondBody.node!)
+            //TODO: check if the game has been won
+        }
+
     }
   
   
