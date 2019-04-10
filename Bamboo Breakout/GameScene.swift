@@ -41,6 +41,25 @@ let BorderCategory : UInt32 = 0x1 << 4
 
 
 class GameScene: SKScene, SKPhysicsContactDelegate {
+    
+    var isFingerOnPaddle = false
+    
+    // Checks the state of the game
+    lazy var gameState: GKStateMachine = GKStateMachine(states: [
+        WaitingForTap(scene: self),
+        Playing(scene: self),
+        GameOver(scene: self)])
+    
+    var gameWon : Bool = false {
+        didSet {
+            let gameOver = childNode(withName: GameMessageName) as! SKSpriteNode
+            let textureName = gameWon ? "YouWon" : "GameOver"
+            let texture = SKTexture(imageNamed: textureName)
+            let actionSequence = SKAction.sequence([SKAction.setTexture(texture), SKAction.scale(to: 1.0, duration: 0.25)])
+            
+            gameOver.run(actionSequence)
+        }
+    }
   
   override func didMove(to view: SKView) {
     super.didMove(to: view)
@@ -60,7 +79,6 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     // set the ball from the child nodes
     let ball = childNode(withName: BallCategoryName) as! SKSpriteNode
     
-    
     // bottom physics body
     let bottomRect = CGRect(x: frame.origin.x, y: frame.origin.y, width: frame.size.width, height: 1)
     let bottom = SKNode()
@@ -71,11 +89,11 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     let paddle = childNode(withName: PaddleCategoryName) as! SKSpriteNode
     
     bottom.physicsBody!.categoryBitMask = BottomCategory
-    ball.physicsBody!.contactTestBitMask = BottomCategory | BlockCategory
+    ball.physicsBody!.contactTestBitMask = BottomCategory
     paddle.physicsBody!.categoryBitMask = PaddleCategory
     borderBody.categoryBitMask = BorderCategory
 
-    ball.physicsBody!.contactTestBitMask = BottomCategory
+    ball.physicsBody!.contactTestBitMask = BottomCategory | BlockCategory | BorderCategory | PaddleCategory
 
 
     // MARK: Blocks
@@ -111,48 +129,33 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     addChild(gameMessage)
     
     gameState.enter(WaitingForTap.self)
-    
-    func randomFloat(from: CGFloat, to: CGFloat) -> CGFloat {
-        let rand: CGFloat = CGFloat(Float(arc4random()) / 0xFFFFFFFF)
-        return (rand) * (to - from) + from
-    }
-
-
   }
-    // Break the Bamboo
-    func breakBlock(node: SKNode) {
-        let particles = SKEmitterNode(fileNamed: "BrokenPlatform")!
-        particles.position = node.position
-        particles.zPosition = 3
-        addChild(particles)
-        particles.run(SKAction.sequence([SKAction.wait(forDuration: 1.0),
-                                         SKAction.removeFromParent()]))
-        node.removeFromParent()
-    }
 
-    
-
-
-    
-    var isFingerOnPaddle = false
-    
-    // Checks the state of the game
-    lazy var gameState: GKStateMachine = GKStateMachine(states: [
-        WaitingForTap(scene: self),
-        Playing(scene: self),
-        GameOver(scene: self)])
-
-    
     // This adds a event in the console saying that you have touched the paddle to begin movement
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        let touch = touches.first
-        let touchLocation = touch!.location(in: self)
+        switch gameState.currentState {
+        case is WaitingForTap:
+            gameState.enter(Playing.self)
+            isFingerOnPaddle = true
+            
+        case is Playing:
+            let touch = touches.first
+            let touchLocation = touch!.location(in: self)
         
-        if let body = physicsWorld.body(at: touchLocation) {
-            if body.node!.name == PaddleCategoryName {
-                print("Began touch on paddle")
-                isFingerOnPaddle = true
+            if let body = physicsWorld.body(at: touchLocation) {
+                if body.node!.name == PaddleCategoryName {
+                    print("Began touch on paddle")
+                    isFingerOnPaddle = true
+                }
             }
+        case is GameOver:
+            let newScene = GameScene(fileNamed:"GameScene")
+            newScene!.scaleMode = .aspectFit
+            let reveal = SKTransition.flipHorizontal(withDuration: 0.5)
+            self.view?.presentScene(newScene!, transition: reveal)
+        
+        default:
+            break
         }
     }
     
@@ -178,9 +181,13 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         isFingerOnPaddle = false 
     }
+    override func update(_ currentTime: TimeInterval) {
+        gameState.update(deltaTime: currentTime)
+    }
     
     // sets up objects compared to bitmasks
     func didBegin(_ contact: SKPhysicsContact) {
+        if gameState.currentState is Playing {
         // 1 variables
         var firstBody: SKPhysicsBody
         var secondBody: SKPhysicsBody
@@ -194,16 +201,41 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         }
         // 3 confirm body categories
         if firstBody.categoryBitMask == BallCategory && secondBody.categoryBitMask == BottomCategory {
-            print("Hit bottom. First contact has been made.")
+            gameState.enter(GameOver.self)
+            gameWon = false
         }
 
         // Checks to see if the block has been broken
         if firstBody.categoryBitMask == BallCategory && secondBody.categoryBitMask == BlockCategory {
             breakBlock(node: secondBody.node!)
             //TODO: check if the game has been won
+            if isGameWon() {
+                gameState.enter(GameOver.self)
+                gameWon = true
+                }
+            }
         }
-
     }
-  
-  
+    
+    // Break the Bamboo
+    func breakBlock(node: SKNode) {
+        let particles = SKEmitterNode(fileNamed: "BrokenPlatform")!
+        particles.position = node.position
+        particles.zPosition = 3
+        addChild(particles)
+        particles.run(SKAction.sequence([SKAction.wait(forDuration: 1.0),SKAction.removeFromParent()]))
+        node.removeFromParent()
+    }
+    func randomFloat(from: CGFloat, to: CGFloat) -> CGFloat {
+        let rand: CGFloat = CGFloat(Float(arc4random()) / 0xFFFFFFFF)
+        return (rand) * (to - from) + from
+    }
+    func isGameWon() -> Bool {
+        var numberOfBricks = 0
+        self.enumerateChildNodes(withName: BlockCategoryName) {
+            node, stop in
+            numberOfBricks = numberOfBricks + 1
+        }
+        return numberOfBricks == 0
+    }
 }
